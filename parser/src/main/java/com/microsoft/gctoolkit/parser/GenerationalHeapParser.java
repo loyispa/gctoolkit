@@ -9,19 +9,7 @@ import com.microsoft.gctoolkit.event.GCCause;
 import com.microsoft.gctoolkit.event.GarbageCollectionTypes;
 import com.microsoft.gctoolkit.event.MemoryPoolSummary;
 import com.microsoft.gctoolkit.event.ReferenceGCSummary;
-import com.microsoft.gctoolkit.event.generational.BinaryTreeDictionary;
-import com.microsoft.gctoolkit.event.generational.CMSRemark;
-import com.microsoft.gctoolkit.event.generational.ConcurrentModeFailure;
-import com.microsoft.gctoolkit.event.generational.ConcurrentModeInterrupted;
-import com.microsoft.gctoolkit.event.generational.DefNew;
-import com.microsoft.gctoolkit.event.generational.FullGC;
-import com.microsoft.gctoolkit.event.generational.InitialMark;
-import com.microsoft.gctoolkit.event.generational.PSFullGC;
-import com.microsoft.gctoolkit.event.generational.PSYoungGen;
-import com.microsoft.gctoolkit.event.generational.ParNew;
-import com.microsoft.gctoolkit.event.generational.ParNewPromotionFailed;
-import com.microsoft.gctoolkit.event.generational.SystemGC;
-import com.microsoft.gctoolkit.event.generational.YoungGC;
+import com.microsoft.gctoolkit.event.generational.*;
 import com.microsoft.gctoolkit.event.jvm.JVMEvent;
 import com.microsoft.gctoolkit.event.jvm.JVMTermination;
 import com.microsoft.gctoolkit.jvm.Diary;
@@ -270,6 +258,8 @@ public class GenerationalHeapParser extends PreUnifiedGCLogParser implements Sim
 
         parseRules.put(new GCParseRule("END_OF_DATA_SENTINEL", END_OF_DATA_SENTINEL), this::endOfFile);
     }
+
+    private DateTimeStamp startOfPhase = null;
 
     public GenerationalHeapParser() {
     }
@@ -777,14 +767,37 @@ public class GenerationalHeapParser extends PreUnifiedGCLogParser implements Sim
     }
 
     public void concurrentPhaseStart(GCLogTrace trace, String line) {
-        //not interesting to this parser
+        startOfPhase = trace.getDateTimeStamp();
     }
 
     public void concurrentPhaseEnd(GCLogTrace trace, String line) {
-        //not interesting to this parser
+        DateTimeStamp endOfPhase = trace.getDateTimeStamp();
+        String phase = trace.getGroup(3);
+        double cpuTime = trace.getDoubleGroup(4);
+        double wallTime = trace.getDoubleGroup(5);
+        double duration = endOfPhase.getTimeStamp() - startOfPhase.getTimeStamp();
+        if ("mark".equals(phase))
+            publish(new ConcurrentMark(startOfPhase, duration, cpuTime, wallTime), false);
+        else if ("preclean".equals(phase))
+            publish(new ConcurrentPreClean(startOfPhase, duration, cpuTime, wallTime), false);
+        else if ("abortable-preclean".equals(phase))
+            publish(new AbortablePreClean(startOfPhase, duration, cpuTime, wallTime, false), false);
+        else if ("sweep".equals(phase))
+            publish(new ConcurrentSweep(startOfPhase, duration, cpuTime, wallTime), false);
+        else if ("reset".equals(phase))
+            publish(new ConcurrentReset(startOfPhase, duration, cpuTime, wallTime), false);
+        else
+            LOGGER.warning("concurrent phase choked on " + trace);
     }
 
     public void abortPrecleanDueToTimeClause(GCLogTrace trace, String line) {
+        try {
+            double cpuTime = trace.getDoubleGroup(4);
+            double wallClock = trace.getDoubleGroup(5);
+            publish(new AbortablePreClean(startOfPhase, trace.getDateTimeStamp().getTimeStamp() - startOfPhase.getTimeStamp(), cpuTime, wallClock, true), false);
+        } catch (Exception e) {
+            LOGGER.warning("concurrent phase end choked on " + trace);
+        }
     }
 
     //12.986: [GC[1 CMS-initial-mark: 33532K(62656K)] 49652K(81280K), 0.0014191 secs] [Times: user=0.00 sys=0.00, real=0.00 secs]
