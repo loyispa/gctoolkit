@@ -5,6 +5,7 @@ package com.microsoft.gctoolkit.parser.unittests;
 import com.microsoft.gctoolkit.event.GCEvent;
 import com.microsoft.gctoolkit.event.GarbageCollectionTypes;
 import com.microsoft.gctoolkit.event.g1gc.G1GCPauseEvent;
+import com.microsoft.gctoolkit.event.generational.CMSConcurrentEvent;
 import com.microsoft.gctoolkit.event.jvm.JVMEvent;
 import com.microsoft.gctoolkit.event.jvm.JVMTermination;
 import com.microsoft.gctoolkit.io.GCLogFile;
@@ -29,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import static com.microsoft.gctoolkit.message.ChannelName.GENERATIONAL_HEAP_PARSER_OUTBOX;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -51,6 +53,7 @@ public abstract class ParserTest {
             Map.entry(GarbageCollectionTypes.InitialMark, 11),
             Map.entry(GarbageCollectionTypes.Remark, 12),
             Map.entry(GarbageCollectionTypes.PSFull, 8),  // bit of a hack to account that the parser is now differentiating between Full and PSFull. (kcp 11/8/15)
+            Map.entry(GarbageCollectionTypes.ConcurrentPhase, 9),
             Map.entry(GarbageCollectionTypes.Mixed, 1),
             Map.entry(GarbageCollectionTypes.G1GCYoungInitialMark, 2),
             Map.entry(GarbageCollectionTypes.G1GCMixedInitialMark, 3),
@@ -207,7 +210,13 @@ public abstract class ParserTest {
         public void publish(ChannelName channel, JVMEvent event) {
             if (!(event instanceof JVMTermination)) {
                 GCEvent gcEvent = (GCEvent) event;
-                int index = collectorNameMapping.get(gcEvent.getGarbageCollectionType());
+
+                GarbageCollectionTypes gcType = gcEvent.getGarbageCollectionType();
+                if (channel == GENERATIONAL_HEAP_PARSER_OUTBOX && event instanceof CMSConcurrentEvent) {
+                    gcType = GarbageCollectionTypes.ConcurrentPhase;
+                }
+
+                int index = collectorNameMapping.get(gcType);
                 counts[index] = counts[index] + 1;
                 if (event instanceof G1GCPauseEvent) {
                     if (((G1GCPauseEvent) event).getPermOrMetaspace() != null)
