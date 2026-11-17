@@ -65,6 +65,19 @@ public abstract class ParserTest {
     }
 
     /**
+     * Same as {@link #feedParser(String[])} but hands the lines to the parser exactly as they appear in a gc log,
+     *
+     * @param lines The GC log lines to be fed to the parser.
+     * @return The list of JVMEvents from the parsed lines.
+     */
+    protected List<JVMEvent> feedParserUntrimmed(String[] lines) {
+        Arrays.stream(lines).forEach(diarizer::diarize);
+        parser.diary(diarizer.getDiary());
+        Arrays.stream(lines).forEach(parser::receive);
+        return channel.events();
+    }
+
+    /**
      * Common check for all GC events that report on memory.
      *
      * @param summary

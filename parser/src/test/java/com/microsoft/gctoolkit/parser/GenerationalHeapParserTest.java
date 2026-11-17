@@ -177,6 +177,40 @@ public class GenerationalHeapParserTest extends ParserTest {
     }
 
     @Test
+    public void testCMSAbortPrecleanDueToTimeWithLeadingBlank() {
+        String[] lines = new String[]{
+                "2026-11-15T22:31:42.462+0800: 282921.241: [GC (CMS Initial Mark) [1 CMS-initial-mark: 2004833K(2796224K)] 2219051K(3914688K), 0.0045051 secs] [Times: user=0.02 sys=0.00, real=0.00 secs] ",
+                "2026-11-15T22:31:42.467+0800: 282921.246: [CMS-concurrent-mark-start]",
+                "2026-11-15T22:31:43.053+0800: 282921.832: [CMS-concurrent-mark: 0.586/0.586 secs] [Times: user=3.41 sys=0.17, real=0.59 secs] ",
+                "2026-11-15T22:31:43.053+0800: 282921.833: [CMS-concurrent-preclean-start]",
+                "2026-11-15T22:31:43.064+0800: 282921.843: [CMS-concurrent-preclean: 0.011/0.011 secs] [Times: user=0.01 sys=0.00, real=0.01 secs] ",
+                "2026-11-15T22:31:43.065+0800: 282921.844: [CMS-concurrent-abortable-preclean-start]",
+                " CMS: abort preclean due to time 2026-11-15T22:31:48.073+0800: 282926.852: [CMS-concurrent-abortable-preclean: 1.121/5.009 secs] [Times: user=1.32 sys=0.09, real=5.01 secs] ",
+                "2026-11-15T22:31:48.075+0800: 282926.854: [GC (CMS Final Remark) [YG occupancy: 240921 K (1118464 K)]2026-11-15T22:31:48.075+0800: 282926.854: [Rescan (parallel) , 0.0063828 secs]2026-11-15T22:31:48.081+0800: 282926.861: [weak refs processing, 0.0016285 secs]2026-11-15T22:31:48.083+0800: 282926.862: [class unloading, 0.1670173 secs]2026-11-15T22:31:48.250+0800: 282927.029: [scrub symbol table, 0.0525350 secs]2026-11-15T22:31:48.303+0800: 282927.082: [scrub string table, 0.0034247 secs][1 CMS-remark: 2004833K(2796224K)] 2245755K(3914688K), 0.2655081 secs] [Times: user=0.31 sys=0.06, real=0.27 secs] ",
+        };
+
+        // Feed only up to the Remark line: the Remark must already be published, not queued behind the sweep phase.
+        List<JVMEvent> jvmEvents = feedParserUntrimmed(lines);
+
+        List<AbortablePreClean> abortablePrecleans = jvmEvents.stream()
+                .filter(AbortablePreClean.class::isInstance)
+                .map(AbortablePreClean.class::cast)
+                .collect(java.util.stream.Collectors.toList());
+        assertEquals(1, abortablePrecleans.size(), "AbortablePreClean must be published for the line with a leading blank");
+        assertEquals(5.009d, abortablePrecleans.get(0).getDuration(), 1e-9);
+        assertTrue(abortablePrecleans.get(0).isAbortedDueToTime());
+
+        List<CMSRemark> remarks = jvmEvents.stream()
+                .filter(CMSRemark.class::isInstance)
+                .map(CMSRemark.class::cast)
+                .collect(java.util.stream.Collectors.toList());
+        assertEquals(1, remarks.size(), "CMSRemark must not be held back by an unterminated concurrent phase");
+        assertEquals(0.2655081d, remarks.get(0).getDuration(), 1e-9);
+        assertEquals(2245755, remarks.get(0).getHeap().getOccupancyAfterCollection());
+        assertEquals(2004833, remarks.get(0).getTenured().getOccupancyAfterCollection());
+    }
+
+    @Test
     public void testThat2CMFDoNotHappen() {
         String[][] lines = new String[][]{
                 {
